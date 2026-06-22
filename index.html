@@ -127,30 +127,23 @@
   </div>
 
   <div class="wrap">
-    <div class="panel">
-      <div class="row" style="margin-bottom:12px">
-        <select id="songSelect" aria-label="Song"></select>
-        <button class="secondary" id="restartBtn" title="Restart song">↺</button>
-      </div>
-      <div class="ctrls">
+    <div class="panel stage" id="stage">
+      <div class="ctrls" style="margin-bottom:14px">
         <button id="micBtn">Start mic</button>
       </div>
-    </div>
-
-    <div class="panel stage" id="stage">
       <div class="lyric-line" id="lyricLine"></div>
       <div class="target-row">
         <span class="target-label">Target</span>
         <span class="target-note" id="targetNote">—</span>
         <span class="target-sub" id="targetSub">Press “Start mic” to begin</span>
       </div>
-      <div class="dots" id="dots"></div>
     </div>
 
     <div class="panel">
       <canvas id="pitchGraph"></canvas>
       <div class="hold-bar" style="margin-top:10px"><div class="hold-fill" id="holdFill"></div></div>
       <div class="hint" id="hint" style="margin-top:8px; text-align:center"></div>
+      <div class="dots" id="dots" style="justify-content:center"></div>
     </div>
 
     <details class="panel" id="tunerPanel">
@@ -169,6 +162,11 @@
     </details>
 
     <div class="panel">
+      <label>Song</label>
+      <div class="row" style="margin: 8px 0 16px">
+        <select id="songSelect" aria-label="Song"></select>
+        <button class="secondary" id="restartBtn" title="Restart song">↺</button>
+      </div>
       <div class="row" style="justify-content:space-between">
         <label class="toggle"><input type="checkbox" id="ignoreOctave" /> Match note name only (ignore octave)</label>
       </div>
@@ -653,6 +651,11 @@ applySensitivity();
 
 /* ---------- Events ---------- */
 micBtn.addEventListener("click", () => running ? stopMic() : startMic());
+
+// Privacy: release the mic whenever the page is backgrounded (app switch, lock,
+// tab change). iOS/Android fire visibilitychange; pagehide covers tab close/nav.
+document.addEventListener("visibilitychange", () => { if (document.hidden && running) stopMic(); });
+window.addEventListener("pagehide", () => { if (running) stopMic(); });
 songSelect.addEventListener("change", () => {
   const raw = SONGS[songSelect.value];
   if (/[\r\n]/.test(raw.trim())) {           // multi-line = lyric+notes format
