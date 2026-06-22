@@ -127,22 +127,21 @@
   </div>
 
   <div class="wrap">
-    <div class="panel stage" id="stage">
-      <div class="ctrls" style="margin-bottom:14px">
-        <button id="micBtn">Start mic</button>
+    <div class="panel">
+      <div class="row" style="margin-bottom:12px">
+        <select id="songSelect" aria-label="Song"></select>
+        <button class="secondary" id="restartBtn" title="Restart song">↺</button>
       </div>
-      <div class="lyric-line" id="lyricLine"></div>
-      <div class="target-row">
-        <span class="target-label">Target</span>
-        <span class="target-note" id="targetNote">—</span>
-        <span class="target-sub" id="targetSub">Press “Start mic” to begin</span>
+      <div class="ctrls">
+        <button id="micBtn">Start mic</button>
       </div>
     </div>
 
     <div class="panel">
+      <div class="lyric-line" id="lyricLine"></div>
+      <div class="target-sub" id="targetSub" style="text-align:center; margin-bottom:8px">Press “Start mic” to begin</div>
       <canvas id="pitchGraph"></canvas>
       <div class="hold-bar" style="margin-top:10px"><div class="hold-fill" id="holdFill"></div></div>
-      <div class="hint" id="hint" style="margin-top:8px; text-align:center"></div>
       <div class="dots" id="dots" style="justify-content:center"></div>
     </div>
 
@@ -162,11 +161,6 @@
     </details>
 
     <div class="panel">
-      <label>Song</label>
-      <div class="row" style="margin: 8px 0 16px">
-        <select id="songSelect" aria-label="Song"></select>
-        <button class="secondary" id="restartBtn" title="Restart song">↺</button>
-      </div>
       <div class="row" style="justify-content:space-between">
         <label class="toggle"><input type="checkbox" id="ignoreOctave" /> Match note name only (ignore octave)</label>
       </div>
@@ -322,14 +316,12 @@ let graphLo = 55, graphHi = 67; // visible MIDI range (recomputed per song)
 /* ---------- DOM ---------- */
 const $ = id => document.getElementById(id);
 const songSelect = $("songSelect");
-const targetNoteEl = $("targetNote");
 const targetSubEl = $("targetSub");
 const lyricLineEl = $("lyricLine");
 const youNoteEl = $("youNote");
 const youCentsEl = $("youCents");
 const needle = $("needle");
 const holdFill = $("holdFill");
-const hintEl = $("hint");
 const dotsEl = $("dots");
 const micBtn = $("micBtn");
 const ignoreOctaveEl = $("ignoreOctave");
@@ -404,13 +396,13 @@ function renderDots() {
 }
 function renderTarget() {
   if (idx >= song.length) {
-    targetNoteEl.textContent = "🎉";
-    targetSubEl.textContent = "Song complete! Press ↺ to do it again.";
+    targetSubEl.textContent = "🎉 Song complete! Press ↺ to do it again.";
     return;
   }
   const m = song[idx];
-  targetNoteEl.textContent = midiToName(m);
-  targetSubEl.textContent = running ? "Sing this note and hold it" : "Press “Start mic” to begin";
+  targetSubEl.textContent = running
+    ? "Sing the highlighted note · " + midiToName(m)
+    : "Press “Start mic” to begin";
 }
 
 /* ---------- Pitch detection (autocorrelation, ACF2+) ---------- */
@@ -466,7 +458,6 @@ function tick() {
     needle.style.left = "50%";
     needle.style.background = "var(--accent)";
     holdStart = null; holdFill.style.width = "0%";
-    hintEl.innerHTML = "";
   } else {
     const det = freqToNote(freq);
     sungMidi = det.midiFloat;
@@ -491,15 +482,6 @@ function tick() {
 
       const inTune = Math.abs(centsFromTarget) <= TOLERANCE_CENTS;
       needle.style.background = inTune ? "var(--good)" : "var(--accent)";
-
-      if (Math.abs(centsFromTarget) > 250 + 0) {
-        // very far — likely wrong note; give directional nudge
-        hintEl.innerHTML = centsFromTarget < 0 ? "Sing <b>higher</b> ⬆️" : "Sing <b>lower</b> ⬇️";
-      } else if (inTune) {
-        hintEl.innerHTML = "<b style='color:var(--good)'>Nice — hold it…</b>";
-      } else {
-        hintEl.innerHTML = centsFromTarget < 0 ? "A touch <b>higher</b>" : "A touch <b>lower</b>";
-      }
 
       // hold-to-advance logic
       if (inTune) {
@@ -593,9 +575,6 @@ function advance() {
   idx++;
   holdStart = null; holdFill.style.width = "0%";
   renderTarget(); renderDots(); renderLyric();
-  if (idx >= song.length) {
-    hintEl.innerHTML = "<b style='color:var(--good)'>Done! 🎉</b>";
-  }
 }
 
 /* ---------- Mic control ---------- */
@@ -631,7 +610,6 @@ function stopMic() {
   if (micStream) micStream.getTracks().forEach(t => t.stop());
   if (audioCtx) audioCtx.close();
   holdStart = null; holdFill.style.width = "0%";
-  hintEl.innerHTML = "";
   youNoteEl.textContent = "—"; youCentsEl.textContent = "";
   needle.style.left = "50%";
   renderTarget();
