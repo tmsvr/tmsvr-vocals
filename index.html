@@ -108,7 +108,7 @@
   canvas#pitchGraph {
     width: 100%; height: 360px; display: block;
     border-radius: 10px; background: var(--panel2); border: 1px solid var(--border);
-    touch-action: none;
+    touch-action: pan-y;   /* allow the page to scroll when swiping over the graph */
   }
 
   .footer { color: var(--muted); font-size: 12px; text-align: center; line-height: 1.5; }
@@ -117,6 +117,7 @@
   .ctrls button { flex: 1; }
   .toggle { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
   .toggle input { width: auto; }
+  .tbtn { flex: 1; padding: 10px 4px; font-size: 13px; min-width: 0; }
 </style>
 </head>
 <body>
@@ -171,6 +172,22 @@
       <div class="row" style="justify-content:space-between">
         <label class="toggle"><input type="checkbox" id="ignoreOctave" /> Match note name only (ignore octave)</label>
       </div>
+
+      <div style="margin-top:14px">
+        <div class="row" style="justify-content:space-between">
+          <label>Transpose (fit your voice)</label>
+          <span class="hint" id="transposeVal">0 (as written)</span>
+        </div>
+        <div class="row" style="gap:6px; margin-top:8px">
+          <button class="secondary tbtn" id="octDown">−12 ⤓ oct</button>
+          <button class="secondary tbtn" id="semiDown">−1</button>
+          <button class="secondary tbtn" id="transReset">Reset</button>
+          <button class="secondary tbtn" id="semiUp">+1</button>
+          <button class="secondary tbtn" id="octUp">+12 ⤒ oct</button>
+        </div>
+        <p class="hint" style="margin-top:6px">Moves the whole song up/down so it sits in your range. Sticks when you switch songs.</p>
+      </div>
+
       <div style="margin-top:14px">
         <div class="row" style="justify-content:space-between">
           <label>Mic sensitivity</label>
@@ -274,15 +291,20 @@ function parsePastedSong(text) {
 
 /* ---------- Built-in songs (kept in a comfortable middle range) ---------- */
 const SONGS = {
-  "Warm-up scale (C major)": "C4 D4 E4 F4 G4 A4 B4 C5 B4 A4 G4 F4 E4 D4 C4",
-  "Twinkle Twinkle":         "C4 C4 G4 G4 A4 A4 G4 F4 F4 E4 E4 D4 D4 C4",
-  "Mary Had a Little Lamb":  "E4 D4 C4 D4 E4 E4 E4 D4 D4 D4 E4 G4 G4",
-  "Ode to Joy":              "E4 E4 F4 G4 G4 F4 E4 D4 C4 C4 D4 E4 E4 D4 D4",
-  "Happy Birthday":          "C4 C4 D4 C4 F4 E4 C4 C4 D4 C4 G4 F4",
+  "Warm-up scale — low (C3)":  "C3 D3 E3 F3 G3 A3 B3 C4 B3 A3 G3 F3 E3 D3 C3",
+  "Twinkle — low (C3)":        "C3 C3 G3 G3 A3 A3 G3 F3 F3 E3 E3 D3 D3 C3",
+  "Ode to Joy — low (C3)":     "E3 E3 F3 G3 G3 F3 E3 D3 C3 C3 D3 E3 E3 D3 D3",
+  "Warm-up scale (C4)":        "C4 D4 E4 F4 G4 A4 B4 C5 B4 A4 G4 F4 E4 D4 C4",
+  "Twinkle Twinkle (C4)":      "C4 C4 G4 G4 A4 A4 G4 F4 F4 E4 E4 D4 D4 C4",
+  "Mary Had a Little Lamb":    "E4 D4 C4 D4 E4 E4 E4 D4 D4 D4 E4 G4 G4",
+  "Ode to Joy (C4)":           "E4 E4 F4 G4 G4 F4 E4 D4 C4 C4 D4 E4 E4 D4 D4",
+  "Happy Birthday":            "C4 C4 D4 C4 F4 E4 C4 C4 D4 C4 G4 F4",
 };
 
 /* ---------- State ---------- */
-let song = parseSong(SONGS["Warm-up scale (C major)"]);
+let baseSong = parseSong(SONGS["Warm-up scale — low (C3)"]); // the song as written
+let transpose = 0;   // semitone shift applied to fit the singer's range (persists across songs)
+let song = baseSong.slice();                                 // baseSong shifted by `transpose`
 let songMeta = [];   // per-note { phraseIndex, sylIndex } when loaded from pasted lyrics
 let phrases = [];    // [{ label, notes, sylls, aligned }]
 let idx = 0;
@@ -318,6 +340,7 @@ const ctx = canvas.getContext("2d");
 const sensEl = $("sensitivity");
 const sensValEl = $("sensVal");
 const levelFill = $("levelFill");
+const transposeValEl = $("transposeVal");
 
 /* populate song dropdown */
 Object.keys(SONGS).forEach(name => {
@@ -327,9 +350,15 @@ Object.keys(SONGS).forEach(name => {
 });
 
 function loadSong(notes, meta, phr) {
-  song = notes.length ? notes : song;
+  baseSong = notes.length ? notes : baseSong;
   songMeta = meta || [];
   phrases = phr || [];
+  applyTranspose(); // sets `song` from baseSong + transpose, recomputes range, re-renders
+}
+
+// Apply the current transpose to baseSong and refresh everything.
+function applyTranspose() {
+  song = baseSong.map(m => m + transpose);
   idx = 0; holdStart = null;
   pitchHistory = [];
   // visible range = song range padded by 3 semitones each side (min one octave shown)
@@ -337,7 +366,17 @@ function loadSong(notes, meta, phr) {
   lo -= 3; hi += 3;
   if (hi - lo < 12) { const mid = (lo + hi) / 2; lo = Math.round(mid - 6); hi = Math.round(mid + 6); }
   graphLo = lo; graphHi = hi;
+  updateTransposeLabel();
   renderTarget(); renderDots(); renderLyric();
+  if (!running) drawGraph(performance.now());
+}
+
+function updateTransposeLabel() {
+  const sign = transpose > 0 ? "+" : "";
+  const octaves = transpose / 12;
+  let extra = "";
+  if (transpose !== 0 && Number.isInteger(octaves)) extra = ` (${sign}${octaves} oct)`;
+  transposeValEl.textContent = transpose === 0 ? "0 (as written)" : `${sign}${transpose} st${extra}`;
 }
 
 // Show the current phrase's lyric, lighting up the syllable being sung.
@@ -624,6 +663,13 @@ songSelect.addEventListener("change", () => {
   }
 });
 $("restartBtn").addEventListener("click", () => { idx = 0; holdStart = null; holdFill.style.width = "0%"; pitchHistory = []; renderTarget(); renderDots(); renderLyric(); });
+
+function shiftTranspose(d) { transpose = Math.max(-24, Math.min(24, transpose + d)); applyTranspose(); }
+$("octDown").addEventListener("click", () => shiftTranspose(-12));
+$("semiDown").addEventListener("click", () => shiftTranspose(-1));
+$("semiUp").addEventListener("click", () => shiftTranspose(1));
+$("octUp").addEventListener("click", () => shiftTranspose(12));
+$("transReset").addEventListener("click", () => { transpose = 0; applyTranspose(); });
 $("loadCustom").addEventListener("click", () => {
   const parsed = parsePastedSong($("customNotes").value);
   if (!parsed.notes.length) { alert("Couldn't read any notes. Put a lyric line, then a notes line under it, e.g.\n\nHello\nB3 A3 f#3"); return; }
