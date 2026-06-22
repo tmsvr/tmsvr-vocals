@@ -1,0 +1,619 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>Vocals — Pitch Trainer</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #181b22;
+    --panel2: #21252e;
+    --text: #e7ecf3;
+    --muted: #8b94a3;
+    --accent: #4cc2ff;
+    --good: #3ddc84;
+    --bad: #ff5d5d;
+    --warn: #ffb340;
+    --border: #2b3038;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-height: 100%;
+    padding: 16px;
+    gap: 16px;
+  }
+  h1 { font-size: 18px; font-weight: 600; margin: 4px 0 0; letter-spacing: 0.3px; }
+  .sub { color: var(--muted); font-size: 13px; margin-top: 2px; }
+  .wrap { width: 100%; max-width: 520px; display: flex; flex-direction: column; gap: 16px; }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 16px;
+  }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
+  select, textarea, button, input {
+    font: inherit; color: var(--text);
+    background: var(--panel2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px 12px;
+  }
+  select { flex: 1; min-width: 0; }
+  textarea { width: 100%; resize: vertical; min-height: 60px; font-family: ui-monospace, Menlo, monospace; font-size: 14px; }
+  button {
+    cursor: pointer; font-weight: 600;
+    background: var(--accent); color: #04263a; border: none;
+    transition: filter .15s, transform .05s;
+  }
+  button:active { transform: scale(0.98); }
+  button.secondary { background: var(--panel2); color: var(--text); border: 1px solid var(--border); }
+  button:disabled { opacity: 0.5; cursor: default; }
+
+  /* Target note display */
+  .stage { text-align: center; padding: 22px 16px; }
+  .target-label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
+  .target-note { font-size: 72px; font-weight: 700; line-height: 1; margin: 6px 0; }
+  .target-sub { color: var(--muted); font-size: 14px; }
+  .lyric-line { font-size: 17px; line-height: 1.5; margin-bottom: 6px; min-height: 22px; color: var(--muted); }
+  .lyric-line .syl { transition: color .1s; }
+  .lyric-line .syl.cur { color: var(--accent); font-weight: 700; }
+  .lyric-line .syl.done { color: var(--text); }
+
+  /* Tuner */
+  .tuner { margin-top: 18px; }
+  .meter {
+    position: relative; height: 64px; border-radius: 10px;
+    background: linear-gradient(90deg, #2a1d1d, #1f2230 30%, #15301f 50%, #1f2230 70%, #2a1d1d);
+    border: 1px solid var(--border); overflow: hidden;
+  }
+  .meter .center { position: absolute; left: 50%; top: 0; bottom: 0; width: 2px; background: rgba(255,255,255,0.25); transform: translateX(-1px); }
+  .needle {
+    position: absolute; top: 6px; bottom: 6px; width: 6px; border-radius: 3px;
+    background: var(--accent); left: 50%; transform: translateX(-3px);
+    transition: left .06s linear, background .1s;
+    box-shadow: 0 0 12px rgba(76,194,255,0.6);
+  }
+  .meter-scale { display: flex; justify-content: space-between; color: var(--muted); font-size: 11px; margin-top: 4px; }
+  .readout { display: flex; justify-content: space-between; align-items: baseline; margin-top: 12px; }
+  .you-note { font-size: 28px; font-weight: 700; }
+  .you-cents { font-size: 14px; color: var(--muted); }
+  .hint { font-size: 13px; color: var(--muted); }
+  .hint b { color: var(--text); }
+
+  /* Progress dots */
+  .dots { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 14px; }
+  .dot {
+    width: 30px; height: 26px; border-radius: 7px; display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 600; background: var(--panel2); color: var(--muted); border: 1px solid var(--border);
+  }
+  .dot.done { background: rgba(61,220,132,0.18); color: var(--good); border-color: rgba(61,220,132,0.4); }
+  .dot.current { background: rgba(76,194,255,0.18); color: var(--accent); border-color: var(--accent); }
+
+  /* Hold progress bar */
+  .hold-bar { height: 6px; border-radius: 3px; background: var(--panel2); overflow: hidden; margin-top: 14px; }
+  .hold-fill { height: 100%; width: 0%; background: var(--good); transition: width .05s linear; }
+
+  /* Pitch graph */
+  canvas#pitchGraph {
+    width: 100%; height: 260px; display: block;
+    border-radius: 10px; background: var(--panel2); border: 1px solid var(--border);
+    touch-action: none;
+  }
+
+  .footer { color: var(--muted); font-size: 12px; text-align: center; line-height: 1.5; }
+  details summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+  .ctrls { display: flex; gap: 10px; }
+  .ctrls button { flex: 1; }
+  .toggle { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
+  .toggle input { width: auto; }
+</style>
+</head>
+<body>
+  <div style="text-align:center">
+    <h1>🎤 Vocals — Pitch Trainer</h1>
+    <div class="sub">Sing the target note. Hold it to advance.</div>
+  </div>
+
+  <div class="wrap">
+    <div class="panel">
+      <div class="row" style="margin-bottom:12px">
+        <select id="songSelect" aria-label="Song"></select>
+        <button class="secondary" id="restartBtn" title="Restart song">↺</button>
+      </div>
+      <div class="ctrls">
+        <button id="micBtn">Start mic</button>
+      </div>
+    </div>
+
+    <div class="panel stage" id="stage">
+      <div class="lyric-line" id="lyricLine"></div>
+      <div class="target-label">Target</div>
+      <div class="target-note" id="targetNote">—</div>
+      <div class="target-sub" id="targetSub">Press “Start mic” to begin</div>
+
+      <div class="tuner">
+        <div class="meter">
+          <div class="center"></div>
+          <div class="needle" id="needle"></div>
+        </div>
+        <div class="meter-scale"><span>♭ flat</span><span>in tune</span><span>sharp ♯</span></div>
+        <div class="hold-bar"><div class="hold-fill" id="holdFill"></div></div>
+        <div class="readout">
+          <div class="you-note" id="youNote">—</div>
+          <div class="you-cents" id="youCents"></div>
+        </div>
+        <div class="hint" id="hint" style="margin-top:8px"></div>
+      </div>
+
+      <div class="dots" id="dots"></div>
+    </div>
+
+    <div class="panel">
+      <label>Pitch trace</label>
+      <canvas id="pitchGraph" style="margin-top:10px"></canvas>
+    </div>
+
+    <div class="panel">
+      <div class="row" style="justify-content:space-between">
+        <label class="toggle"><input type="checkbox" id="ignoreOctave" /> Match note name only (ignore octave)</label>
+      </div>
+      <details style="margin-top:12px" open>
+        <summary>Paste a song (lyrics + notes)</summary>
+        <p class="hint" style="margin-top:10px">
+          Write a <b>lyric line</b>, then its <b>notes line</b> underneath. Repeat for each phrase.
+          Notes can be lowercase, use <b>#</b> for sharps, and an octave number (middle C = C4).
+          If a phrase's word count matches its note count, the words light up as you sing.
+        </p>
+        <textarea id="customNotes" rows="8" placeholder="Hello ive waited here for you
+B3 A3 f#3 b3 f#3 f#3 e3 f#3
+
+Tonight i throw my self in to o
+B3 A3 f#3 D4 C#4 B3 A3 F#3 E3"></textarea>
+        <div class="ctrls" style="margin-top:10px">
+          <button id="loadCustom">Load this song</button>
+        </div>
+      </details>
+    </div>
+
+    <div class="footer">
+      Best with headphones in a quiet room. On phones, the page must be served over HTTPS for the mic to work.
+    </div>
+  </div>
+
+<script>
+/* ---------- Music helpers ---------- */
+const NOTE_NAMES = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
+
+// MIDI number -> frequency (A4 = 69 = 440Hz)
+function midiToFreq(m) { return 440 * Math.pow(2, (m - 69) / 12); }
+// frequency -> { midi (float), name, octave, cents }
+function freqToNote(freq) {
+  const midiFloat = 69 + 12 * Math.log2(freq / 440);
+  const midi = Math.round(midiFloat);
+  const cents = Math.round((midiFloat - midi) * 100);
+  return { midiFloat, midi, cents, name: NOTE_NAMES[(midi % 12 + 12) % 12], octave: Math.floor(midi / 12) - 1 };
+}
+// "C4" / "A#3" -> midi number
+function noteNameToMidi(str) {
+  const m = str.trim().match(/^([A-Ga-g])(#|b)?(-?\d+)$/);
+  if (!m) return null;
+  let idx = NOTE_NAMES.indexOf(m[1].toUpperCase());
+  if (m[2] === "#") idx += 1;
+  if (m[2] === "b") idx -= 1;
+  const octave = parseInt(m[3], 10);
+  return idx + (octave + 1) * 12;
+}
+function midiToName(m) { return NOTE_NAMES[(m % 12 + 12) % 12] + (Math.floor(m / 12) - 1); }
+function parseSong(str) {
+  return str.trim().split(/\s+/).map(noteNameToMidi).filter(v => v !== null);
+}
+
+// Split a lyric line into singable syllables: break on spaces and dashes, drop punctuation.
+function splitSyllables(line) {
+  return line.split(/[\s-]+/).map(w => w.replace(/[^A-Za-z0-9']/g, "")).filter(Boolean);
+}
+// Is this line mostly note tokens (vs. a lyric line)?
+function isNoteLine(line) {
+  const toks = line.trim().split(/\s+/).filter(Boolean);
+  if (!toks.length) return false;
+  const hits = toks.filter(t => noteNameToMidi(t) !== null).length;
+  return hits >= Math.ceil(toks.length * 0.6);
+}
+// Parse the "lyric line / notes line" format into { notes:[], meta:[], phrases:[] }.
+// meta[i] = { phraseIndex, sylIndex }  (sylIndex is null when words don't align to notes)
+function parsePastedSong(text) {
+  const lines = text.split(/\r?\n/);
+  const phrases = [];
+  let pendingLyric = "";
+  for (const line of lines) {
+    if (!line.trim()) { pendingLyric = ""; continue; }
+    if (isNoteLine(line)) {
+      const notes = line.trim().split(/\s+/).map(noteNameToMidi).filter(v => v !== null);
+      if (notes.length) {
+        const sylls = splitSyllables(pendingLyric);
+        phrases.push({ label: pendingLyric.trim(), notes, sylls, aligned: sylls.length === notes.length });
+      }
+      pendingLyric = "";
+    } else {
+      pendingLyric = line; // remember the lyric line for the notes line that follows
+    }
+  }
+  const notes = [], meta = [];
+  phrases.forEach((p, pi) => p.notes.forEach((m, i) => {
+    notes.push(m);
+    meta.push({ phraseIndex: pi, sylIndex: p.aligned ? i : null });
+  }));
+  return { notes, meta, phrases };
+}
+
+/* ---------- Built-in songs (kept in a comfortable middle range) ---------- */
+const SONGS = {
+  "Warm-up scale (C major)": "C4 D4 E4 F4 G4 A4 B4 C5 B4 A4 G4 F4 E4 D4 C4",
+  "Twinkle Twinkle":         "C4 C4 G4 G4 A4 A4 G4 F4 F4 E4 E4 D4 D4 C4",
+  "Mary Had a Little Lamb":  "E4 D4 C4 D4 E4 E4 E4 D4 D4 D4 E4 G4 G4",
+  "Ode to Joy":              "E4 E4 F4 G4 G4 F4 E4 D4 C4 C4 D4 E4 E4 D4 D4",
+  "Happy Birthday":          "C4 C4 D4 C4 F4 E4 C4 C4 D4 C4 G4 F4",
+};
+
+/* ---------- State ---------- */
+let song = parseSong(SONGS["Warm-up scale (C major)"]);
+let songMeta = [];   // per-note { phraseIndex, sylIndex } when loaded from pasted lyrics
+let phrases = [];    // [{ label, notes, sylls, aligned }]
+let idx = 0;
+let running = false;
+let audioCtx, analyser, micStream, rafId;
+let buf;
+const HOLD_MS = 600;          // how long you must hold the note
+const TOLERANCE_CENTS = 35;   // how close counts as "in tune"
+let holdStart = null;
+
+// Pitch graph state
+const GRAPH_WINDOW_MS = 7000; // how many seconds of history are visible
+let pitchHistory = [];        // { t, midi } ; midi is a float, or null when silent
+let graphLo = 55, graphHi = 67; // visible MIDI range (recomputed per song)
+
+/* ---------- DOM ---------- */
+const $ = id => document.getElementById(id);
+const songSelect = $("songSelect");
+const targetNoteEl = $("targetNote");
+const targetSubEl = $("targetSub");
+const lyricLineEl = $("lyricLine");
+const youNoteEl = $("youNote");
+const youCentsEl = $("youCents");
+const needle = $("needle");
+const holdFill = $("holdFill");
+const hintEl = $("hint");
+const dotsEl = $("dots");
+const micBtn = $("micBtn");
+const ignoreOctaveEl = $("ignoreOctave");
+const canvas = $("pitchGraph");
+const ctx = canvas.getContext("2d");
+
+/* populate song dropdown */
+Object.keys(SONGS).forEach(name => {
+  const o = document.createElement("option");
+  o.value = name; o.textContent = name;
+  songSelect.appendChild(o);
+});
+
+function loadSong(notes, meta, phr) {
+  song = notes.length ? notes : song;
+  songMeta = meta || [];
+  phrases = phr || [];
+  idx = 0; holdStart = null;
+  pitchHistory = [];
+  // visible range = song range padded by 3 semitones each side (min one octave shown)
+  let lo = Math.min(...song), hi = Math.max(...song);
+  lo -= 3; hi += 3;
+  if (hi - lo < 12) { const mid = (lo + hi) / 2; lo = Math.round(mid - 6); hi = Math.round(mid + 6); }
+  graphLo = lo; graphHi = hi;
+  renderTarget(); renderDots(); renderLyric();
+}
+
+// Show the current phrase's lyric, lighting up the syllable being sung.
+function renderLyric() {
+  if (!songMeta.length || idx >= song.length) { lyricLineEl.innerHTML = ""; return; }
+  const meta = songMeta[idx];
+  const ph = phrases[meta.phraseIndex];
+  if (!ph) { lyricLineEl.innerHTML = ""; return; }
+  if (ph.aligned) {
+    lyricLineEl.innerHTML = ph.sylls.map((s, i) => {
+      const cls = i === meta.sylIndex ? "cur" : i < meta.sylIndex ? "done" : "";
+      return `<span class="syl ${cls}">${s}</span>`;
+    }).join(" ");
+  } else {
+    // counts don't line up — just show the line as a caption
+    lyricLineEl.textContent = ph.label;
+  }
+}
+function renderDots() {
+  dotsEl.innerHTML = "";
+  song.forEach((m, i) => {
+    const d = document.createElement("div");
+    d.className = "dot" + (i < idx ? " done" : i === idx ? " current" : "");
+    d.textContent = midiToName(m);
+    dotsEl.appendChild(d);
+  });
+}
+function renderTarget() {
+  if (idx >= song.length) {
+    targetNoteEl.textContent = "🎉";
+    targetSubEl.textContent = "Song complete! Press ↺ to do it again.";
+    return;
+  }
+  const m = song[idx];
+  targetNoteEl.textContent = midiToName(m);
+  targetSubEl.textContent = running ? "Sing this note and hold it" : "Press “Start mic” to begin";
+}
+
+/* ---------- Pitch detection (autocorrelation, ACF2+) ---------- */
+function autoCorrelate(buffer, sampleRate) {
+  const SIZE = buffer.length;
+  let rms = 0;
+  for (let i = 0; i < SIZE; i++) rms += buffer[i] * buffer[i];
+  rms = Math.sqrt(rms / SIZE);
+  if (rms < 0.01) return -1; // too quiet
+
+  let r1 = 0, r2 = SIZE - 1, thres = 0.2;
+  for (let i = 0; i < SIZE / 2; i++) if (Math.abs(buffer[i]) < thres) { r1 = i; break; }
+  for (let i = 1; i < SIZE / 2; i++) if (Math.abs(buffer[SIZE - i]) < thres) { r2 = SIZE - i; break; }
+  const b = buffer.slice(r1, r2);
+  const newSize = b.length;
+
+  const c = new Array(newSize).fill(0);
+  for (let i = 0; i < newSize; i++)
+    for (let j = 0; j < newSize - i; j++)
+      c[i] += b[j] * b[j + i];
+
+  let d = 0; while (c[d] > c[d + 1]) d++;
+  let maxval = -1, maxpos = -1;
+  for (let i = d; i < newSize; i++) {
+    if (c[i] > maxval) { maxval = c[i]; maxpos = i; }
+  }
+  let T0 = maxpos;
+  // parabolic interpolation for sub-sample accuracy
+  const x1 = c[T0 - 1], x2 = c[T0], x3 = c[T0 + 1];
+  const a = (x1 + x3 - 2 * x2) / 2, bb = (x3 - x1) / 2;
+  if (a) T0 = T0 - bb / (2 * a);
+
+  return sampleRate / T0;
+}
+
+/* ---------- Main loop ---------- */
+function tick() {
+  analyser.getFloatTimeDomainData(buf);
+  const freq = autoCorrelate(buf, audioCtx.sampleRate);
+  let sungMidi = null;
+
+  if (freq <= 0 || freq < 65 || freq > 1200) {
+    youNoteEl.textContent = "—";
+    youCentsEl.textContent = "(too quiet / no pitch)";
+    needle.style.left = "50%";
+    needle.style.background = "var(--accent)";
+    holdStart = null; holdFill.style.width = "0%";
+    hintEl.innerHTML = "";
+  } else {
+    const det = freqToNote(freq);
+    sungMidi = det.midiFloat;
+    youNoteEl.textContent = det.name + det.octave;
+    youCentsEl.textContent = (det.cents >= 0 ? "+" : "") + det.cents + "¢";
+
+    if (idx < song.length) {
+      const targetMidi = song[idx];
+      // cents difference between sung pitch and the TARGET note
+      const targetFreq = midiToFreq(targetMidi);
+      let centsFromTarget = 1200 * Math.log2(freq / targetFreq);
+
+      // if ignoring octave, fold into nearest octave of the target
+      if (ignoreOctaveEl.checked) {
+        while (centsFromTarget > 600) centsFromTarget -= 1200;
+        while (centsFromTarget < -600) centsFromTarget += 1200;
+      }
+
+      // needle position: clamp ±100 cents to the meter width
+      const clamped = Math.max(-100, Math.min(100, centsFromTarget));
+      needle.style.left = (50 + clamped / 2) + "%";
+
+      const inTune = Math.abs(centsFromTarget) <= TOLERANCE_CENTS;
+      needle.style.background = inTune ? "var(--good)" : "var(--accent)";
+
+      if (Math.abs(centsFromTarget) > 250 + 0) {
+        // very far — likely wrong note; give directional nudge
+        hintEl.innerHTML = centsFromTarget < 0 ? "Sing <b>higher</b> ⬆️" : "Sing <b>lower</b> ⬇️";
+      } else if (inTune) {
+        hintEl.innerHTML = "<b style='color:var(--good)'>Nice — hold it…</b>";
+      } else {
+        hintEl.innerHTML = centsFromTarget < 0 ? "A touch <b>higher</b>" : "A touch <b>lower</b>";
+      }
+
+      // hold-to-advance logic
+      if (inTune) {
+        if (holdStart === null) holdStart = performance.now();
+        const held = performance.now() - holdStart;
+        holdFill.style.width = Math.min(100, (held / HOLD_MS) * 100) + "%";
+        if (held >= HOLD_MS) advance();
+      } else {
+        holdStart = null;
+        holdFill.style.width = "0%";
+      }
+    }
+  }
+  // when ignoring octave, fold the trace toward the current target so it lands on the band
+  if (sungMidi !== null && ignoreOctaveEl.checked && idx < song.length) {
+    while (sungMidi - song[idx] > 6) sungMidi -= 12;
+    while (sungMidi - song[idx] < -6) sungMidi += 12;
+  }
+
+  const now = performance.now();
+  pitchHistory.push({ t: now, midi: sungMidi });
+  while (pitchHistory.length && now - pitchHistory[0].t > GRAPH_WINDOW_MS) pitchHistory.shift();
+  drawGraph(now);
+
+  rafId = requestAnimationFrame(tick);
+}
+
+/* ---------- Pitch graph rendering ---------- */
+function resizeCanvas() {
+  const dpr = window.devicePixelRatio || 1;
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  canvas.width = w * dpr; canvas.height = h * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+function midiToY(midi, h) {
+  // higher notes near the top; half-semitone padding so end rows aren't clipped
+  const lo = graphLo - 0.5, hi = graphHi + 0.5;
+  return h - ((midi - lo) / (hi - lo)) * h;
+}
+function drawGraph(now) {
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  const semiPx = h / (graphHi - graphLo + 1);
+  ctx.clearRect(0, 0, w, h);
+
+  // highlight band for the current target note
+  if (idx < song.length) {
+    const tm = song[idx];
+    const yTop = midiToY(tm + 0.5, h), yBot = midiToY(tm - 0.5, h);
+    ctx.fillStyle = "rgba(61,220,132,0.16)";
+    ctx.fillRect(0, yTop, w, yBot - yTop);
+    ctx.fillStyle = "rgba(61,220,132,0.9)";
+    ctx.font = "600 12px -apple-system, sans-serif";
+    ctx.fillText("▶ " + midiToName(tm), 6, yTop + (yBot - yTop) / 2 + 4);
+  }
+
+  // horizontal guide lines for every semitone; label the natural notes
+  for (let m = graphLo; m <= graphHi; m++) {
+    const y = midiToY(m, h);
+    const isNatural = ![1, 3, 6, 8, 10].includes((m % 12 + 12) % 12);
+    ctx.strokeStyle = isNatural ? "rgba(255,255,255,0.14)" : "rgba(255,255,255,0.05)";
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(34, y); ctx.lineTo(w, y); ctx.stroke();
+    if (isNatural) {
+      ctx.fillStyle = "rgba(139,148,163,0.85)";
+      ctx.font = "11px -apple-system, sans-serif";
+      ctx.fillText(midiToName(m), 4, y + 4);
+    }
+  }
+
+  // the sung pitch trace (newest at the right edge)
+  let started = false;
+  ctx.lineWidth = 3; ctx.lineJoin = "round"; ctx.lineCap = "round";
+  for (const s of pitchHistory) {
+    if (s.midi === null) { started = false; continue; }
+    const x = 34 + (w - 34) * (1 - (now - s.t) / GRAPH_WINDOW_MS);
+    const y = midiToY(Math.max(graphLo - 0.5, Math.min(graphHi + 0.5, s.midi)), h);
+    // green when within tolerance of the current target
+    const onTarget = idx < song.length && Math.abs(s.midi - song[idx]) * 100 <= TOLERANCE_CENTS;
+    ctx.strokeStyle = onTarget ? "#3ddc84" : "#4cc2ff";
+    if (!started) { ctx.beginPath(); ctx.moveTo(x, y); started = true; }
+    else { ctx.lineTo(x, y); ctx.stroke(); ctx.beginPath(); ctx.moveTo(x, y); }
+  }
+
+  // "now" marker at the right edge
+  ctx.strokeStyle = "rgba(255,255,255,0.25)";
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(w - 1, 0); ctx.lineTo(w - 1, h); ctx.stroke();
+}
+
+function advance() {
+  idx++;
+  holdStart = null; holdFill.style.width = "0%";
+  renderTarget(); renderDots(); renderLyric();
+  if (idx >= song.length) {
+    hintEl.innerHTML = "<b style='color:var(--good)'>Done! 🎉</b>";
+  }
+}
+
+/* ---------- Mic control ---------- */
+async function startMic() {
+  try {
+    micStream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+    });
+  } catch (e) {
+    alert("Could not access the microphone.\n\n" + e.message +
+          "\n\nTip: the page must be served over HTTPS (or localhost), and you must allow mic access.");
+    return;
+  }
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  const src = audioCtx.createMediaStreamSource(micStream);
+  analyser = audioCtx.createAnalyser();
+  analyser.fftSize = 2048;
+  buf = new Float32Array(analyser.fftSize);
+  src.connect(analyser);
+
+  running = true;
+  micBtn.textContent = "Stop mic";
+  micBtn.classList.add("secondary");
+  resizeCanvas();
+  renderTarget();
+  tick();
+}
+function stopMic() {
+  running = false;
+  micBtn.textContent = "Start mic";
+  micBtn.classList.remove("secondary");
+  cancelAnimationFrame(rafId);
+  if (micStream) micStream.getTracks().forEach(t => t.stop());
+  if (audioCtx) audioCtx.close();
+  holdStart = null; holdFill.style.width = "0%";
+  hintEl.innerHTML = "";
+  youNoteEl.textContent = "—"; youCentsEl.textContent = "";
+  needle.style.left = "50%";
+  renderTarget();
+  idleDraw();
+}
+
+/* ---------- Events ---------- */
+micBtn.addEventListener("click", () => running ? stopMic() : startMic());
+songSelect.addEventListener("change", () => {
+  const raw = SONGS[songSelect.value];
+  if (/[\r\n]/.test(raw.trim())) {           // multi-line = lyric+notes format
+    const p = parsePastedSong(raw);
+    loadSong(p.notes, p.meta, p.phrases);
+  } else {
+    loadSong(parseSong(raw));
+  }
+});
+$("restartBtn").addEventListener("click", () => { idx = 0; holdStart = null; holdFill.style.width = "0%"; pitchHistory = []; renderTarget(); renderDots(); renderLyric(); });
+$("loadCustom").addEventListener("click", () => {
+  const parsed = parsePastedSong($("customNotes").value);
+  if (!parsed.notes.length) { alert("Couldn't read any notes. Put a lyric line, then a notes line under it, e.g.\n\nHello\nB3 A3 f#3"); return; }
+  // add/replace a "Pasted song" entry in the dropdown and select it
+  const label = "★ Pasted song";
+  SONGS[label] = $("customNotes").value;
+  if (![...songSelect.options].some(o => o.value === label)) {
+    const o = document.createElement("option"); o.value = label; o.textContent = label;
+    songSelect.insertBefore(o, songSelect.firstChild);
+  }
+  songSelect.value = label;
+  loadSong(parsed.notes, parsed.meta, parsed.phrases);
+});
+
+// keep the grid visible & redrawing even before the mic starts
+function idleDraw() {
+  if (!running) {
+    const now = performance.now();
+    while (pitchHistory.length && now - pitchHistory[0].t > GRAPH_WINDOW_MS) pitchHistory.shift();
+    drawGraph(now);
+    requestAnimationFrame(idleDraw);
+  }
+}
+window.addEventListener("resize", () => { resizeCanvas(); drawGraph(performance.now()); });
+
+/* ---------- Init ---------- */
+resizeCanvas();
+loadSong(song);
+idleDraw();
+</script>
+</body>
+</html>
