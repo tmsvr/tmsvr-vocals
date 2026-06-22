@@ -167,6 +167,18 @@
       <div class="row" style="justify-content:space-between">
         <label class="toggle"><input type="checkbox" id="ignoreOctave" /> Match note name only (ignore octave)</label>
       </div>
+      <div style="margin-top:14px">
+        <div class="row" style="justify-content:space-between">
+          <label>Mic sensitivity</label>
+          <span class="hint" id="sensVal">medium</span>
+        </div>
+        <input type="range" id="sensitivity" min="0" max="100" value="60" style="width:100%; margin-top:8px" />
+        <div class="row" style="align-items:center; gap:8px; margin-top:8px">
+          <span class="hint" style="min-width:64px">Input level</span>
+          <div class="hold-bar" style="flex:1; margin-top:0"><div class="hold-fill" id="levelFill" style="background:var(--accent)"></div></div>
+        </div>
+        <p class="hint" style="margin-top:6px">Slide right if it ignores quiet singing; slide left if background noise triggers it. The bar should jump when you sing and the line past which it counts is shown in green.</p>
+      </div>
       <details style="margin-top:12px" open>
         <summary>Paste a song (lyrics + notes)</summary>
         <p class="hint" style="margin-top:10px">
@@ -276,6 +288,7 @@ let buf;
 const HOLD_MS = 600;          // how long you must hold the note
 const TOLERANCE_CENTS = 35;   // how close counts as "in tune"
 let holdStart = null;
+let RMS_GATE = 0.004;         // loudness needed to register a note (lower = more sensitive)
 
 // Pitch graph state
 const GRAPH_WINDOW_MS = 7000; // how many seconds of history are visible
@@ -298,6 +311,9 @@ const micBtn = $("micBtn");
 const ignoreOctaveEl = $("ignoreOctave");
 const canvas = $("pitchGraph");
 const ctx = canvas.getContext("2d");
+const sensEl = $("sensitivity");
+const sensValEl = $("sensVal");
+const levelFill = $("levelFill");
 
 /* populate song dropdown */
 Object.keys(SONGS).forEach(name => {
@@ -362,7 +378,7 @@ function autoCorrelate(buffer, sampleRate) {
   let rms = 0;
   for (let i = 0; i < SIZE; i++) rms += buffer[i] * buffer[i];
   rms = Math.sqrt(rms / SIZE);
-  if (rms < 0.01) return -1; // too quiet
+  if (rms < RMS_GATE) return -1; // too quiet
 
   let r1 = 0, r2 = SIZE - 1, thres = 0.2;
   for (let i = 0; i < SIZE / 2; i++) if (Math.abs(buffer[i]) < thres) { r1 = i; break; }
@@ -392,6 +408,14 @@ function autoCorrelate(buffer, sampleRate) {
 /* ---------- Main loop ---------- */
 function tick() {
   analyser.getFloatTimeDomainData(buf);
+
+  // live input level for the meter (same RMS the gate uses)
+  let rms = 0;
+  for (let i = 0; i < buf.length; i++) rms += buf[i] * buf[i];
+  rms = Math.sqrt(rms / buf.length);
+  levelFill.style.width = Math.min(100, (rms / 0.05) * 100) + "%";
+  levelFill.style.background = rms >= RMS_GATE ? "var(--good)" : "var(--accent)";
+
   const freq = autoCorrelate(buf, audioCtx.sampleRate);
   let sungMidi = null;
 
@@ -537,7 +561,7 @@ function advance() {
 async function startMic() {
   try {
     micStream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: true }
     });
   } catch (e) {
     alert("Could not access the microphone.\n\n" + e.message +
@@ -572,6 +596,16 @@ function stopMic() {
   renderTarget();
   idleDraw();
 }
+
+/* ---------- Sensitivity ---------- */
+// slider 0..100 -> RMS gate, exponential (right = more sensitive = lower gate)
+function applySensitivity() {
+  const v = +sensEl.value / 100;
+  RMS_GATE = 0.02 * Math.pow(0.0008 / 0.02, v);
+  sensValEl.textContent = v < 0.34 ? "low" : v < 0.67 ? "medium" : "high";
+}
+sensEl.addEventListener("input", applySensitivity);
+applySensitivity();
 
 /* ---------- Events ---------- */
 micBtn.addEventListener("click", () => running ? stopMic() : startMic());
