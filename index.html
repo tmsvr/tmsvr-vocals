@@ -60,10 +60,11 @@
   button:disabled { opacity: 0.5; cursor: default; }
 
   /* Target note display */
-  .stage { text-align: center; padding: 22px 16px; }
+  .stage { text-align: center; padding: 14px 16px; }
+  .target-row { display: flex; align-items: baseline; justify-content: center; gap: 10px; flex-wrap: wrap; }
   .target-label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
-  .target-note { font-size: 72px; font-weight: 700; line-height: 1; margin: 6px 0; }
-  .target-sub { color: var(--muted); font-size: 14px; }
+  .target-note { font-size: 40px; font-weight: 700; line-height: 1.1; }
+  .target-sub { color: var(--muted); font-size: 13px; }
   .lyric-line { font-size: 17px; line-height: 1.5; margin-bottom: 6px; min-height: 22px; color: var(--muted); }
   .lyric-line .syl { transition: color .1s; }
   .lyric-line .syl.cur { color: var(--accent); font-weight: 700; }
@@ -105,7 +106,7 @@
 
   /* Pitch graph */
   canvas#pitchGraph {
-    width: 100%; height: 260px; display: block;
+    width: 100%; height: 360px; display: block;
     border-radius: 10px; background: var(--panel2); border: 1px solid var(--border);
     touch-action: none;
   }
@@ -137,31 +138,34 @@
 
     <div class="panel stage" id="stage">
       <div class="lyric-line" id="lyricLine"></div>
-      <div class="target-label">Target</div>
-      <div class="target-note" id="targetNote">—</div>
-      <div class="target-sub" id="targetSub">Press “Start mic” to begin</div>
+      <div class="target-row">
+        <span class="target-label">Target</span>
+        <span class="target-note" id="targetNote">—</span>
+        <span class="target-sub" id="targetSub">Press “Start mic” to begin</span>
+      </div>
+      <div class="dots" id="dots"></div>
+    </div>
 
-      <div class="tuner">
+    <div class="panel">
+      <canvas id="pitchGraph"></canvas>
+      <div class="hold-bar" style="margin-top:10px"><div class="hold-fill" id="holdFill"></div></div>
+      <div class="hint" id="hint" style="margin-top:8px; text-align:center"></div>
+    </div>
+
+    <details class="panel" id="tunerPanel">
+      <summary>Tuner — flat / sharp needle &amp; cents</summary>
+      <div class="tuner" style="margin-top:14px">
         <div class="meter">
           <div class="center"></div>
           <div class="needle" id="needle"></div>
         </div>
         <div class="meter-scale"><span>♭ flat</span><span>in tune</span><span>sharp ♯</span></div>
-        <div class="hold-bar"><div class="hold-fill" id="holdFill"></div></div>
         <div class="readout">
           <div class="you-note" id="youNote">—</div>
           <div class="you-cents" id="youCents"></div>
         </div>
-        <div class="hint" id="hint" style="margin-top:8px"></div>
       </div>
-
-      <div class="dots" id="dots"></div>
-    </div>
-
-    <div class="panel">
-      <label>Pitch trace</label>
-      <canvas id="pitchGraph" style="margin-top:10px"></canvas>
-    </div>
+    </details>
 
     <div class="panel">
       <div class="row" style="justify-content:space-between">
