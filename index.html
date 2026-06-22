@@ -172,7 +172,7 @@
           <label>Mic sensitivity</label>
           <span class="hint" id="sensVal">medium</span>
         </div>
-        <input type="range" id="sensitivity" min="0" max="100" value="60" style="width:100%; margin-top:8px" />
+        <input type="range" id="sensitivity" min="0" max="100" value="55" style="width:100%; margin-top:8px" />
         <div class="row" style="align-items:center; gap:8px; margin-top:8px">
           <span class="hint" style="min-width:64px">Input level</span>
           <div class="hold-bar" style="flex:1; margin-top:0"><div class="hold-fill" id="levelFill" style="background:var(--accent)"></div></div>
@@ -601,8 +601,9 @@ function stopMic() {
 // slider 0..100 -> RMS gate, exponential (right = more sensitive = lower gate)
 function applySensitivity() {
   const v = +sensEl.value / 100;
-  RMS_GATE = 0.02 * Math.pow(0.0008 / 0.02, v);
-  sensValEl.textContent = v < 0.34 ? "low" : v < 0.67 ? "medium" : "high";
+  // v=0 -> 0.004 (old "medium"), v=0.5 -> ~0.0008 (old "high"), v=1 -> 0.0002 (extra sensitive)
+  RMS_GATE = 0.004 * Math.pow(0.0002 / 0.004, v);
+  sensValEl.textContent = v < 0.34 ? "medium" : v < 0.67 ? "high" : "max";
 }
 sensEl.addEventListener("input", applySensitivity);
 applySensitivity();
