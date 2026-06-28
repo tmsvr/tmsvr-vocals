@@ -2,8 +2,17 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
 <title>Vocals — Pitch Trainer</title>
+
+<!-- PWA / installable -->
+<link rel="manifest" href="manifest.webmanifest" />
+<meta name="theme-color" content="#0f1115" />
+<link rel="apple-touch-icon" href="apple-touch-icon.png" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Vocals" />
 <style>
   :root {
     --bg: #0f1115;
@@ -28,6 +37,8 @@
     align-items: center;
     min-height: 100%;
     padding: 16px;
+    padding-top: calc(16px + env(safe-area-inset-top));
+    padding-bottom: calc(16px + env(safe-area-inset-bottom));
     gap: 16px;
   }
   h1 { font-size: 18px; font-weight: 600; margin: 4px 0 0; letter-spacing: 0.3px; }
@@ -691,6 +702,11 @@ window.addEventListener("resize", () => { resizeCanvas(); drawGraph(performance.
 resizeCanvas();
 loadSong(song);
 idleDraw();
+
+// Register the service worker so the app installs and works offline.
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
+}
 </script>
 </body>
 </html>
