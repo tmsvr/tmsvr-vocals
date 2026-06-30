@@ -661,7 +661,7 @@ sensEl.addEventListener("input", applySensitivity);
 applySensitivity();
 
 /* ---------- Reference tone (press & hold to hear the target note) ---------- */
-let toneCtx, toneOsc, toneGain, toneToken = 0, toneStartMs = 0;
+let toneCtx, toneOscs = null, toneGain, toneToken = 0, toneStartMs = 0;
 const TONE_MIN_MS = 450; // a quick tap still sounds for at least this long
 
 function startTone() {
@@ -670,30 +670,46 @@ function startTone() {
   if (!toneCtx) toneCtx = new (window.AudioContext || window.webkitAudioContext)();
   if (toneCtx.state === "suspended") toneCtx.resume(); // iOS needs a gesture
   const t = toneCtx.currentTime;
-  toneOsc = toneCtx.createOscillator();
+  const freq = midiToFreq(song[idx]);
+
+  // master gain -> limiter -> speakers. Limiter lets us push level without clipping.
   toneGain = toneCtx.createGain();
-  toneOsc.type = "triangle";
-  toneOsc.frequency.value = midiToFreq(song[idx]);
+  const comp = toneCtx.createDynamicsCompressor();
+  comp.threshold.value = -10; comp.ratio.value = 12; comp.attack.value = 0.003; comp.release.value = 0.25;
   toneGain.gain.setValueAtTime(0, t);
-  toneGain.gain.linearRampToValueAtTime(0.28, t + 0.02); // tiny fade-in, no click
-  toneOsc.connect(toneGain).connect(toneCtx.destination);
-  toneOsc.start();
+  toneGain.gain.linearRampToValueAtTime(0.85, t + 0.02); // louder; click-free fade-in
+  toneGain.connect(comp).connect(toneCtx.destination);
+
+  // Phone speakers barely reproduce low fundamentals (e.g. B2 ~123Hz). Stacking the
+  // octave + a fifth above gives energy the speaker can actually output, so low
+  // notes are audible. The fundamental still defines the pitch you match.
+  toneOscs = [];
+  const add = (f, type, level) => {
+    const o = toneCtx.createOscillator(), g = toneCtx.createGain();
+    o.type = type; o.frequency.value = f; g.gain.value = level;
+    o.connect(g).connect(toneGain); o.start();
+    toneOscs.push(o);
+  };
+  add(freq, "triangle", 1.0);       // fundamental (the pitch)
+  add(freq * 2, "sine", 0.6);       // octave up — carries on small speakers
+  add(freq * 3, "sine", 0.25);      // twelfth — extra presence for very low notes
+
   toneStartMs = performance.now();
   toneToken++;
   playNoteBtn.classList.add("active");
 }
 function hardStopTone() { // stop immediately, e.g. before starting a new tone
-  if (!toneOsc) return;
+  if (!toneOscs) return;
   const t = toneCtx.currentTime;
   toneGain.gain.cancelScheduledValues(t);
   toneGain.gain.setValueAtTime(toneGain.gain.value, t);
   toneGain.gain.linearRampToValueAtTime(0, t + 0.04);
-  toneOsc.stop(t + 0.05);
-  toneOsc = null; toneGain = null;
+  toneOscs.forEach(o => o.stop(t + 0.05));
+  toneOscs = null; toneGain = null;
   playNoteBtn.classList.remove("active");
 }
 function releaseTone() { // on button release: honor a minimum audible duration
-  if (!toneOsc) return;
+  if (!toneOscs) return;
   const my = ++toneToken;
   const wait = Math.max(0, TONE_MIN_MS - (performance.now() - toneStartMs));
   setTimeout(() => { if (my === toneToken) hardStopTone(); }, wait);
