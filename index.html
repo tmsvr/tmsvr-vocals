@@ -750,7 +750,7 @@ micBtn.addEventListener("click", () => running ? stopMic() : startMic());
 // tab change). iOS/Android fire visibilitychange; pagehide covers tab close/nav.
 document.addEventListener("visibilitychange", () => { if (document.hidden && running) stopMic(); });
 window.addEventListener("pagehide", () => { if (running) stopMic(); });
-songSelect.addEventListener("change", () => {
+function loadSelectedSong() {
   const raw = SONGS[songSelect.value];
   if (/[\r\n]/.test(raw.trim())) {           // multi-line = lyric+notes format
     const p = parsePastedSong(raw);
@@ -758,7 +758,8 @@ songSelect.addEventListener("change", () => {
   } else {
     loadSong(parseSong(raw));
   }
-});
+}
+songSelect.addEventListener("change", loadSelectedSong);
 $("restartBtn").addEventListener("click", () => { idx = 0; holdStart = null; holdFill.style.width = "0%"; pitchHistory = []; renderTarget(); renderDots(); renderLyric(); });
 
 function shiftTranspose(d) { transpose = Math.max(-24, Math.min(24, transpose + d)); applyTranspose(); }
@@ -794,7 +795,10 @@ window.addEventListener("resize", () => { resizeCanvas(); drawGraph(performance.
 
 /* ---------- Init ---------- */
 resizeCanvas();
-loadSong(song);
+// Sync the dropdown with the song actually loaded (otherwise the first option
+// would look selected while a different song is loaded, and re-picking it is a no-op).
+songSelect.value = "Warm-up scale — low (C3)";
+loadSelectedSong();
 idleDraw();
 
 // Register the service worker so the app installs and works offline.
