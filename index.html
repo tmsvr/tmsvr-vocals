@@ -102,6 +102,13 @@
   .hint { font-size: 13px; color: var(--muted); }
   .hint b { color: var(--text); }
 
+  .playnote {
+    display: block; width: 100%; margin-top: 14px;
+    user-select: none; -webkit-user-select: none; touch-action: manipulation;
+  }
+  .playnote.active { background: var(--accent); color: #04263a; border-color: var(--accent); }
+  .playnote:disabled { opacity: 0.45; }
+
   /* Progress dots */
   .dots { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 14px; }
   .dot {
@@ -154,6 +161,7 @@
       <canvas id="pitchGraph"></canvas>
       <div class="hold-bar" style="margin-top:10px"><div class="hold-fill" id="holdFill"></div></div>
       <div class="dots" id="dots" style="justify-content:center"></div>
+      <button id="playNote" class="secondary playnote">🔊 Hold to hear the note</button>
     </div>
 
     <details class="panel" id="tunerPanel">
@@ -353,6 +361,7 @@ const sensEl = $("sensitivity");
 const sensValEl = $("sensVal");
 const levelFill = $("levelFill");
 const transposeValEl = $("transposeVal");
+const playNoteBtn = $("playNote");
 
 /* populate song dropdown */
 Object.keys(SONGS).forEach(name => {
@@ -417,7 +426,9 @@ function renderDots() {
   });
 }
 function renderTarget() {
-  if (idx >= song.length) {
+  const done = idx >= song.length;
+  if (playNoteBtn) playNoteBtn.disabled = done;
+  if (done) {
     targetSubEl.textContent = "🎉 Song complete! Press ↺ to do it again.";
     return;
   }
@@ -648,6 +659,49 @@ function applySensitivity() {
 }
 sensEl.addEventListener("input", applySensitivity);
 applySensitivity();
+
+/* ---------- Reference tone (press & hold to hear the target note) ---------- */
+let toneCtx, toneOsc, toneGain, toneToken = 0, toneStartMs = 0;
+const TONE_MIN_MS = 450; // a quick tap still sounds for at least this long
+
+function startTone() {
+  if (idx >= song.length) return;
+  hardStopTone();
+  if (!toneCtx) toneCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (toneCtx.state === "suspended") toneCtx.resume(); // iOS needs a gesture
+  const t = toneCtx.currentTime;
+  toneOsc = toneCtx.createOscillator();
+  toneGain = toneCtx.createGain();
+  toneOsc.type = "triangle";
+  toneOsc.frequency.value = midiToFreq(song[idx]);
+  toneGain.gain.setValueAtTime(0, t);
+  toneGain.gain.linearRampToValueAtTime(0.28, t + 0.02); // tiny fade-in, no click
+  toneOsc.connect(toneGain).connect(toneCtx.destination);
+  toneOsc.start();
+  toneStartMs = performance.now();
+  toneToken++;
+  playNoteBtn.classList.add("active");
+}
+function hardStopTone() { // stop immediately, e.g. before starting a new tone
+  if (!toneOsc) return;
+  const t = toneCtx.currentTime;
+  toneGain.gain.cancelScheduledValues(t);
+  toneGain.gain.setValueAtTime(toneGain.gain.value, t);
+  toneGain.gain.linearRampToValueAtTime(0, t + 0.04);
+  toneOsc.stop(t + 0.05);
+  toneOsc = null; toneGain = null;
+  playNoteBtn.classList.remove("active");
+}
+function releaseTone() { // on button release: honor a minimum audible duration
+  if (!toneOsc) return;
+  const my = ++toneToken;
+  const wait = Math.max(0, TONE_MIN_MS - (performance.now() - toneStartMs));
+  setTimeout(() => { if (my === toneToken) hardStopTone(); }, wait);
+}
+
+["pointerdown"].forEach(ev => playNoteBtn.addEventListener(ev, (e) => { e.preventDefault(); startTone(); }));
+["pointerup", "pointerleave", "pointercancel"].forEach(ev => playNoteBtn.addEventListener(ev, releaseTone));
+playNoteBtn.addEventListener("contextmenu", (e) => e.preventDefault()); // no long-press menu
 
 /* ---------- Events ---------- */
 micBtn.addEventListener("click", () => running ? stopMic() : startMic());
