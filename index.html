@@ -136,6 +136,33 @@
   .toggle { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
   .toggle input { width: auto; }
   .tbtn { flex: 1; padding: 10px 4px; font-size: 13px; min-width: 0; }
+
+  .best-line { text-align: center; color: var(--muted); font-size: 12px; margin-top: 10px; min-height: 15px; }
+  .best-line b { color: var(--accent); }
+
+  /* Results modal */
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.6); backdrop-filter: blur(3px);
+    display: flex; align-items: center; justify-content: center; padding: 20px; z-index: 50;
+  }
+  .modal-overlay[hidden] { display: none; }
+  .modal {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 18px;
+    padding: 24px; width: 100%; max-width: 380px; text-align: center;
+    animation: pop .25s ease-out;
+  }
+  @keyframes pop { from { transform: scale(0.92); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+  .result-grade { font-size: 64px; font-weight: 800; line-height: 1; color: var(--good); }
+  .result-stars { font-size: 22px; color: var(--warn); letter-spacing: 2px; margin-top: 4px; }
+  .result-song { color: var(--muted); font-size: 13px; margin-top: 10px; }
+  .result-overall { font-size: 40px; font-weight: 700; margin-top: 4px; }
+  .result-overall .pct { font-size: 20px; color: var(--muted); }
+  .result-best { font-size: 13px; margin-top: 4px; min-height: 18px; }
+  .result-best.new { color: var(--good); font-weight: 700; }
+  .result-metrics { display: flex; gap: 8px; margin-top: 18px; }
+  .metric { flex: 1; background: var(--panel2); border: 1px solid var(--border); border-radius: 10px; padding: 12px 6px; }
+  .m-val { font-size: 20px; font-weight: 700; }
+  .m-lab { font-size: 11px; color: var(--muted); margin-top: 3px; }
 </style>
 </head>
 <body>
@@ -153,6 +180,7 @@
       <div class="ctrls">
         <button id="micBtn">Start mic</button>
       </div>
+      <div class="best-line" id="bestLine"></div>
     </div>
 
     <div class="panel">
@@ -231,6 +259,26 @@ B3 A3 f#3 D4 C#4 B3 A3 F#3 E3"></textarea>
 
     <div class="footer">
       Best with headphones in a quiet room. On phones, the page must be served over HTTPS for the mic to work.
+    </div>
+  </div>
+
+  <!-- Results modal -->
+  <div class="modal-overlay" id="resultsOverlay" hidden>
+    <div class="modal" role="dialog" aria-modal="true">
+      <div class="result-grade" id="resGrade">A</div>
+      <div class="result-stars" id="resStars">★★★★★</div>
+      <div class="result-song" id="resSong"></div>
+      <div class="result-overall"><span id="resOverall">0</span><span class="pct">%</span></div>
+      <div class="result-best" id="resBest"></div>
+      <div class="result-metrics">
+        <div class="metric"><div class="m-val" id="resPitch">0%</div><div class="m-lab">Pitch accuracy</div></div>
+        <div class="metric"><div class="m-val" id="resCents">0¢</div><div class="m-lab">Avg off-target</div></div>
+        <div class="metric"><div class="m-val" id="resSpeed">0%</div><div class="m-lab">Note-finding</div></div>
+      </div>
+      <div class="ctrls" style="margin-top:18px; gap:10px">
+        <button class="secondary" id="resClose" style="flex:1">Close</button>
+        <button id="resRetry" style="flex:1">Sing again</button>
+      </div>
     </div>
   </div>
 
@@ -338,6 +386,11 @@ const TOLERANCE_CENTS = 35;   // how close counts as "in tune"
 let holdStart = null;
 let RMS_GATE = 0.004;         // loudness needed to register a note (lower = more sensitive)
 
+// Scoring state (reset per attempt). One entry per completed note.
+let scoreNotes = [];          // { avgCents, searchMs }
+let noteActiveSince = 0;      // when the current target note became active
+let holdCentsSum = 0, holdCentsCount = 0; // accuracy accumulator for the current hold
+
 // Pitch graph state
 const GRAPH_WINDOW_MS = 7000; // how many seconds of history are visible
 let pitchHistory = [];        // { t, midi } ; midi is a float, or null when silent
@@ -348,6 +401,8 @@ const $ = id => document.getElementById(id);
 const songSelect = $("songSelect");
 const targetSubEl = $("targetSub");
 const lyricLineEl = $("lyricLine");
+const bestLineEl = $("bestLine");
+const resultsOverlay = $("resultsOverlay");
 const youNoteEl = $("youNote");
 const youCentsEl = $("youCents");
 const needle = $("needle");
@@ -382,6 +437,7 @@ function applyTranspose() {
   song = baseSong.map(m => m + transpose);
   idx = 0; holdStart = null;
   pitchHistory = [];
+  resetScore();
   // visible range = song range padded by 3 semitones each side (min one octave shown)
   let lo = Math.min(...song), hi = Math.max(...song);
   lo -= 3; hi += 3;
@@ -518,7 +574,8 @@ function tick() {
 
       // hold-to-advance logic
       if (inTune) {
-        if (holdStart === null) holdStart = performance.now();
+        if (holdStart === null) { holdStart = performance.now(); holdCentsSum = 0; holdCentsCount = 0; }
+        holdCentsSum += Math.abs(centsFromTarget); holdCentsCount++; // accuracy of the final hold
         const held = performance.now() - holdStart;
         holdFill.style.width = Math.min(100, (held / HOLD_MS) * 100) + "%";
         if (held >= HOLD_MS) advance();
@@ -605,9 +662,65 @@ function drawGraph(now) {
 }
 
 function advance() {
+  // record how this note went, then move on
+  const avgCents = holdCentsCount ? holdCentsSum / holdCentsCount : TOLERANCE_CENTS;
+  const searchMs = Math.max(0, performance.now() - noteActiveSince - HOLD_MS);
+  scoreNotes.push({ avgCents, searchMs });
+
   idx++;
   holdStart = null; holdFill.style.width = "0%";
+  noteActiveSince = performance.now();
   renderTarget(); renderDots(); renderLyric();
+  if (idx >= song.length) finishSong();
+}
+
+function resetScore() { scoreNotes = []; holdCentsSum = 0; holdCentsCount = 0; noteActiveSince = performance.now(); }
+
+// Turn the per-note metrics into an overall score + breakdown.
+function computeScore(notes) {
+  const mean = (a) => a.reduce((s, x) => s + x, 0) / a.length;
+  const clamp = (v) => Math.max(0, Math.min(100, v));
+  const avgCents = mean(notes.map(n => n.avgCents));
+  // ≤10¢ off ≈ 100%, scaling to 0 at the ±35¢ tolerance edge — rewards centered pitch.
+  const EXCELLENT = 10;
+  const pitch = mean(notes.map(n => clamp(100 * (TOLERANCE_CENTS - n.avgCents) / (TOLERANCE_CENTS - EXCELLENT))));
+  const speed = mean(notes.map(n => 100 * Math.exp(-n.searchMs / 2000))); // 0ms=100, ~1.4s≈50
+  const overall = Math.round(0.7 * pitch + 0.3 * speed);
+  const grade = overall >= 93 ? "A" : overall >= 85 ? "A−" : overall >= 78 ? "B" :
+                overall >= 70 ? "C" : overall >= 60 ? "D" : "E";
+  return { overall, pitch: Math.round(pitch), speed: Math.round(speed),
+           avgCents: Math.round(avgCents), grade, stars: Math.max(1, Math.round(overall / 20)) };
+}
+
+function finishSong() {
+  if (running) stopMic();
+  const res = computeScore(scoreNotes);
+  const key = "vocals.best." + songSelect.value;
+  const prevBest = parseInt(localStorage.getItem(key) || "0", 10);
+  const isBest = res.overall > prevBest;
+  if (isBest) { try { localStorage.setItem(key, String(res.overall)); } catch (e) {} }
+  showResults(res, prevBest, isBest);
+  updateBestLabel();
+}
+
+function showResults(res, prevBest, isBest) {
+  $("resGrade").textContent = res.grade;
+  $("resStars").textContent = "★★★★★☆☆☆☆☆".slice(5 - res.stars, 10 - res.stars);
+  $("resSong").textContent = songSelect.value + (transpose ? `  (transposed ${transpose > 0 ? "+" : ""}${transpose})` : "");
+  $("resOverall").textContent = res.overall;
+  $("resPitch").textContent = res.pitch + "%";
+  $("resCents").textContent = "±" + res.avgCents + "¢";
+  $("resSpeed").textContent = res.speed + "%";
+  const bestEl = $("resBest");
+  if (isBest) { bestEl.textContent = prevBest ? `🎉 New personal best! (was ${prevBest}%)` : "🎉 New personal best!"; bestEl.className = "result-best new"; }
+  else { bestEl.textContent = `Personal best: ${prevBest}%`; bestEl.className = "result-best"; }
+  resultsOverlay.hidden = false;
+}
+function hideResults() { resultsOverlay.hidden = true; }
+
+function updateBestLabel() {
+  const best = parseInt(localStorage.getItem("vocals.best." + songSelect.value) || "0", 10);
+  bestLineEl.innerHTML = best ? `Personal best: <b>${best}%</b>` : "No score yet — finish the song to set a personal best.";
 }
 
 /* ---------- Mic control ---------- */
@@ -629,6 +742,8 @@ async function startMic() {
   src.connect(analyser);
 
   running = true;
+  if (idx === 0) resetScore();   // fresh attempt timing from the first note
+  else noteActiveSince = performance.now();
   micBtn.textContent = "Stop mic";
   micBtn.classList.add("secondary");
   resizeCanvas();
@@ -758,9 +873,20 @@ function loadSelectedSong() {
   } else {
     loadSong(parseSong(raw));
   }
+  hideResults();
+  updateBestLabel();
 }
 songSelect.addEventListener("change", loadSelectedSong);
-$("restartBtn").addEventListener("click", () => { idx = 0; holdStart = null; holdFill.style.width = "0%"; pitchHistory = []; renderTarget(); renderDots(); renderLyric(); });
+
+// Results modal buttons
+$("resClose").addEventListener("click", hideResults);
+$("resRetry").addEventListener("click", () => {
+  hideResults();
+  idx = 0; holdStart = null; holdFill.style.width = "0%"; pitchHistory = []; resetScore();
+  renderTarget(); renderDots(); renderLyric();
+  startMic();
+});
+$("restartBtn").addEventListener("click", () => { idx = 0; holdStart = null; holdFill.style.width = "0%"; pitchHistory = []; resetScore(); renderTarget(); renderDots(); renderLyric(); });
 
 function shiftTranspose(d) { transpose = Math.max(-24, Math.min(24, transpose + d)); applyTranspose(); }
 $("octDown").addEventListener("click", () => shiftTranspose(-12));
@@ -780,6 +906,7 @@ $("loadCustom").addEventListener("click", () => {
   }
   songSelect.value = label;
   loadSong(parsed.notes, parsed.meta, parsed.phrases);
+  updateBestLabel();
 });
 
 // keep the grid visible & redrawing even before the mic starts
