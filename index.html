@@ -531,6 +531,23 @@ function autoCorrelate(buffer, sampleRate) {
 function tick() {
   analyser.getFloatTimeDomainData(buf);
 
+  // Ignore the mic while the reference tone is sounding — otherwise it "hears"
+  // itself and would score/advance as if you had sung the note.
+  if (toneOscs) {
+    const now = performance.now();
+    youNoteEl.textContent = "—";
+    youCentsEl.textContent = "(reference tone — mic paused)";
+    needle.style.left = "50%"; needle.style.background = "var(--accent)";
+    levelFill.style.width = "0%";
+    holdStart = null; holdFill.style.width = "0%";
+    noteActiveSince = now; // don't penalize note-finding for paused time
+    pitchHistory.push({ t: now, midi: null }); // leave a gap in the trace
+    while (pitchHistory.length && now - pitchHistory[0].t > GRAPH_WINDOW_MS) pitchHistory.shift();
+    drawGraph(now);
+    rafId = requestAnimationFrame(tick);
+    return;
+  }
+
   // live input level for the meter (same RMS the gate uses)
   let rms = 0;
   for (let i = 0; i < buf.length; i++) rms += buf[i] * buf[i];
