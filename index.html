@@ -109,6 +109,17 @@
   .playnote.active { background: var(--accent); color: #04263a; border-color: var(--accent); }
   .playnote:disabled { opacity: 0.45; }
 
+  /* Graph + vertical scroll controls */
+  .graph-row { display: flex; gap: 8px; align-items: stretch; }
+  .graph-canvas-wrap { flex: 1; min-width: 0; }
+  .view-ctrls { display: flex; flex-direction: column; gap: 8px; width: 42px; }
+  .view-ctrls button {
+    flex: 1; padding: 0; font-size: 16px; font-weight: 700;
+    background: var(--panel2); color: var(--text); border: 1px solid var(--border);
+    touch-action: manipulation; -webkit-user-select: none; user-select: none;
+  }
+  .view-ctrls button:active { background: var(--accent); color: #04263a; }
+
   /* Progress dots */
   .dots { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 14px; }
   .dot {
@@ -186,7 +197,13 @@
     <div class="panel">
       <div class="lyric-line" id="lyricLine"></div>
       <div class="target-sub" id="targetSub" style="text-align:center; margin-bottom:8px">Press “Start mic” to begin</div>
-      <canvas id="pitchGraph"></canvas>
+      <div class="graph-row">
+        <div class="graph-canvas-wrap"><canvas id="pitchGraph"></canvas></div>
+        <div class="view-ctrls">
+          <button id="viewUp" title="Show higher notes">▲</button>
+          <button id="viewDown" title="Show lower notes">▼</button>
+        </div>
+      </div>
       <div class="hold-bar" style="margin-top:10px"><div class="hold-fill" id="holdFill"></div></div>
       <div class="dots" id="dots" style="justify-content:center"></div>
       <button id="playNote" class="secondary playnote">🔊 Hold to hear the note</button>
@@ -395,6 +412,8 @@ let holdCentsSum = 0, holdCentsCount = 0; // accuracy accumulator for the curren
 const GRAPH_WINDOW_MS = 7000; // how many seconds of history are visible
 let pitchHistory = [];        // { t, midi } ; midi is a float, or null when silent
 let graphLo = 55, graphHi = 67; // visible MIDI range (recomputed per song)
+let baseGraphLo = 55, baseGraphHi = 67; // auto-fit range before the user's manual scroll
+let viewOffset = 0;             // semitones the user has scrolled the view up/down
 
 /* ---------- DOM ---------- */
 const $ = id => document.getElementById(id);
@@ -442,10 +461,23 @@ function applyTranspose() {
   let lo = Math.min(...song), hi = Math.max(...song);
   lo -= 3; hi += 3;
   if (hi - lo < 12) { const mid = (lo + hi) / 2; lo = Math.round(mid - 6); hi = Math.round(mid + 6); }
-  graphLo = lo; graphHi = hi;
+  baseGraphLo = lo; baseGraphHi = hi;
+  viewOffset = 0;               // new song/transpose resets any manual scroll
+  applyView();
   updateTransposeLabel();
   renderTarget(); renderDots(); renderLyric();
   if (!running) drawGraph(performance.now());
+}
+
+// Apply the manual vertical scroll on top of the auto-fit range.
+function applyView() {
+  graphLo = baseGraphLo + viewOffset;
+  graphHi = baseGraphHi + viewOffset;
+}
+function shiftView(semitones) {
+  viewOffset = Math.max(-36, Math.min(36, viewOffset + semitones));
+  applyView();
+  if (!running) drawGraph(performance.now()); // while running, next tick redraws
 }
 
 function updateTransposeLabel() {
@@ -911,6 +943,8 @@ $("semiDown").addEventListener("click", () => shiftTranspose(-1));
 $("semiUp").addEventListener("click", () => shiftTranspose(1));
 $("octUp").addEventListener("click", () => shiftTranspose(12));
 $("transReset").addEventListener("click", () => { transpose = 0; applyTranspose(); });
+$("viewUp").addEventListener("click", () => shiftView(2));    // show higher notes
+$("viewDown").addEventListener("click", () => shiftView(-2)); // show lower notes
 $("loadCustom").addEventListener("click", () => {
   const parsed = parsePastedSong($("customNotes").value);
   if (!parsed.notes.length) { alert("Couldn't read any notes. Put a lyric line, then a notes line under it, e.g.\n\nHello\nB3 A3 f#3"); return; }
