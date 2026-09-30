@@ -580,6 +580,29 @@ function tick() {
     return;
   }
 
+  // Watchdog: iOS can silently wedge the input (suspended context, interrupted
+  // track). A live mic always carries a little noise, so a buffer of exact zeros
+  // means the pipeline is dead — wake it / reopen the stream instead of needing a reload.
+  let allZero = true;
+  for (let i = 0; i < buf.length; i += 8) if (buf[i] !== 0) { allZero = false; break; }
+  const track = micStream && micStream.getAudioTracks()[0];
+  const dead = allZero || audioCtx.state !== "running" ||
+               (track && (track.readyState === "ended" || track.muted));
+  if (dead) {
+    const now = performance.now();
+    if (!deadSinceMs) deadSinceMs = now;
+    if (audioCtx.state !== "running") audioCtx.resume().catch(() => {});
+    // back off between attempts; after 3 tries, ask for a tap (which can always resume audio)
+    if (recoverAttempts < 3 && now - deadSinceMs > 1500 * (recoverAttempts + 1)) recoverMic();
+    if (recoverAttempts >= 3) {
+      targetSubEl.textContent = "Mic not responding — tap Stop mic, then Start mic.";
+      micWarned = true;
+    }
+  } else {
+    deadSinceMs = 0; recoverAttempts = 0;
+    if (micWarned) { micWarned = false; renderTarget(); } // restore the normal status line
+  }
+
   // live input level for the meter (same RMS the gate uses)
   let rms = 0;
   for (let i = 0; i < buf.length; i++) rms += buf[i] * buf[i];
@@ -773,22 +796,54 @@ function updateBestLabel() {
 }
 
 /* ---------- Mic control ---------- */
+// One AudioContext shared by the mic and the reference tone, created on the first
+// tap and never closed. iOS limits contexts, starts them suspended outside a gesture,
+// and wedges the mic when separate record/playback contexts come and go.
+let sharedCtx = null;
+function getAudioCtx() {
+  if (!sharedCtx) sharedCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (sharedCtx.state !== "running") sharedCtx.resume().catch(() => {});
+  return sharedCtx;
+}
+
+let micSource = null, micStarting = false;
+let deadSinceMs = 0, recovering = false, recoverAttempts = 0, micWarned = false;
+
+function openMicStream() {
+  return navigator.mediaDevices.getUserMedia({
+    audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: true }
+  });
+}
+function connectMic() {
+  if (micSource) { try { micSource.disconnect(); } catch (e) {} }
+  micSource = audioCtx.createMediaStreamSource(micStream);
+  if (!analyser) {
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 2048;
+    buf = new Float32Array(analyser.fftSize);
+  }
+  micSource.connect(analyser);
+  const track = micStream.getAudioTracks()[0];
+  if (track) track.onended = () => { if (running) recoverMic(); };
+}
+
 async function startMic() {
+  if (micStarting || running) return;
+  micStarting = true;
+  const ctx = getAudioCtx(); // must happen synchronously inside the tap (iOS)
   try {
-    micStream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: true }
-    });
+    micStream = await openMicStream();
   } catch (e) {
+    micStarting = false;
     alert("Could not access the microphone.\n\n" + e.message +
           "\n\nTip: the page must be served over HTTPS (or localhost), and you must allow mic access.");
     return;
   }
-  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  const src = audioCtx.createMediaStreamSource(micStream);
-  analyser = audioCtx.createAnalyser();
-  analyser.fftSize = 2048;
-  buf = new Float32Array(analyser.fftSize);
-  src.connect(analyser);
+  try { if (ctx.state !== "running") await ctx.resume(); } catch (e) {}
+  audioCtx = ctx;
+  connectMic();
+  micStarting = false;
+  deadSinceMs = 0; recoverAttempts = 0;
 
   running = true;
   if (idx === 0) resetScore();   // fresh attempt timing from the first note
@@ -799,13 +854,36 @@ async function startMic() {
   renderTarget();
   tick();
 }
+
+// Reconnect a dead input: wake the context, then reopen the mic stream.
+async function recoverMic() {
+  if (recovering || !running) return;
+  recovering = true;
+  recoverAttempts++;
+  targetSubEl.textContent = "Reconnecting mic…";
+  micWarned = true;
+  try {
+    const ctx = getAudioCtx();
+    if (ctx.state !== "running") await ctx.resume();
+    if (micStream) micStream.getTracks().forEach(t => t.stop());
+    micStream = await openMicStream();
+    if (running) connectMic();
+  } catch (e) {
+    recoverAttempts = 99; // give up; ask for a tap below
+  }
+  deadSinceMs = 0;
+  recovering = false;
+}
+
 function stopMic() {
   running = false;
   micBtn.textContent = "Start mic";
   micBtn.classList.remove("secondary");
   cancelAnimationFrame(rafId);
+  if (micSource) { try { micSource.disconnect(); } catch (e) {} micSource = null; }
   if (micStream) micStream.getTracks().forEach(t => t.stop());
-  if (audioCtx) audioCtx.close();
+  micStream = null;
+  // The shared AudioContext stays alive on purpose — closing it is what wedges iOS.
   holdStart = null; holdFill.style.width = "0%";
   youNoteEl.textContent = "—"; youCentsEl.textContent = "";
   needle.style.left = "50%";
@@ -828,11 +906,10 @@ applySensitivity();
 let toneCtx, toneOscs = null, toneGain, toneToken = 0, toneStartMs = 0, toneHeld = false;
 const TONE_MIN_MS = 450; // a quick tap still sounds for at least this long
 
-// Create (once) and keep the audio context awake. iOS starts it suspended and only
-// resumes inside a user gesture; resume() is async, so we call this on every gesture.
+// The tone plays through the same shared context as the mic. Called on every tap
+// to keep it awake (iOS only resumes inside a gesture; resume() is async).
 function ensureToneCtx() {
-  if (!toneCtx) toneCtx = new (window.AudioContext || window.webkitAudioContext)();
-  if (toneCtx.state === "suspended") toneCtx.resume();
+  toneCtx = getAudioCtx();
   return toneCtx;
 }
 
